@@ -1,0 +1,19 @@
+{
+  "name": "if-i-were-game",
+  "version": "1.0.0",
+  "description": "A multiplayer 'If I Were' game using Firebase",
+  "homepage": "https://kelesetlogelo-tech.github.io/if-i-were-game",
+  "scripts": {
+    "start": "http-server -p 3000",
+    "deploy": "gh-pages -d .",
+    "predeploy": "npm run build",
+    "build": "echo 'Building...'"
+  },
+  "dependencies": {
+    "firebase": "^9.22.0"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.3.0",
+    "http-server": "^14.1.1"
+  }
+}

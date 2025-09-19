@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>If I Were... - Multiplayer Game</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { database, ref, onValue, set, get, update, remove } from './firebase-config.js';
+        
+        // Make Firebase available globally for the game
+        window.firebase = {
+            database,
+            ref,
+            onValue,
+            set,
+            get,
+            update,
+            remove
+        };
+        
+        // Initialize the game after Firebase is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            new MultiplayerIfIWereGame();
+        });
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎭 If I Were...</h1>
+            <p class="subtitle">A fun multiplayer guessing game!</p>
+        </header>
+
+        <!-- Initial Setup Phase -->
+        <div id="initial-setup" class="game-phase active">
+            <div class="card">
+                <h2>Welcome to If I Were...</h2>
+                
+                <!-- Host Game Section -->
+                <div class="setup-option">
+                    <h3>🎮 Host a New Game</h3>
+                    <p>Create a game room for your friends to join</p>
+                    <div class="host-controls">
+                        <label for="player-count">Number of players (2-8):</label>
+                        <select id="player-count">
+                            <option value="2">2 Players</option>
+                            <option value="3">3 Players</option>
+                            <option value="4">4 Players</option>
+                            <option value="5">5 Players</option>
+                            <option value="6">6 Players</option>
+                            <option value="7">7 Players</option>
+                            <option value="8">8 Players</option>
+                        </select>
+                        <input type="text" id="host-name" placeholder="Your name" required>
+                        <button id="create-room" class="btn btn-primary">Create Game Room</button>
+                    </div>
+                </div>
+
+                <div class="divider">OR</div>
+
+                <!-- Join Game Section -->
+                <div class="setup-option">
+                    <h3>🚪 Join Existing Game</h3>
+                    <p>Enter the room code shared by your host</p>
+                    <div class="join-controls">
+                        <input type="text" id="room-code" placeholder="Enter 6-digit room code" maxlength="6">
+                        <input type="text" id="player-name" placeholder="Your name" required>
+                        <button id="join-room" class="btn btn-secondary">Join Game</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Waiting Room Phase -->
+        <div id="waiting-room" class="game-phase">
+            <div class="card">
+                <div class="room-header">
+                    <h2>🎯 Game Room</h2>
+                    <div class="room-code-display">
+                        <span class="room-label">Room Code:</span>
+                        <span id="display-room-code" class="room-code">------</span>
+                        <button id="copy-code" class="btn-copy" title="Copy sharing instructions">📋 Share</button>
+                    </div>
+                    <div class="share-instructions">
+                        <p>📱 <strong>Share this code with players:</strong> <span id="share-room-code" class="highlight-code">------</span></p>
+                        <p class="share-note">Players can join from any device using this code!</p>
+                    </div>
+                </div>
+
+                <div class="waiting-info">
+                    <div class="player-counter">
+                        <span id="joined-count">0</span> of <span id="total-count">0</span> players joined
+                    </div>
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill"></div>
+                    </div>
+                </div>
+
+                <div class="players-waiting">
+                    <h3>👥 Players in Room:</h3>
+                    <ul id="waiting-players-list"></ul>
+                </div>
+
+                <div id="host-controls" class="host-section" style="display: none;">
+                    <button id="start-game" class="btn btn-success" style="display: none;">🚀 Start Game</button>
+                    <p class="host-note">Waiting for all players to join...</p>
+                </div>
+
+                <div id="player-waiting" class="player-section" style="display: none;">
+                    <p class="waiting-message">⏳ Waiting for host to start the game...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Answer Phase -->
+        <div id="answer-phase" class="game-phase">
+            <div class="card">
+                <h2>Answer the Questions</h2>
+                <div class="game-progress">
+                    <div class="current-player-info">
+                        <span class="your-turn" id="turn-indicator">Your turn!</span>
+                        <span class="player-name" id="current-answerer">You</span>
+                    </div>
+                </div>
+                
+                <div class="questions-container">
+                    <div class="question">
+                        <h3>1. If I were a sound effect, I'd be:</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q1" value="Ka-ching!"> Ka-ching!</label>
+                            <label><input type="radio" name="q1" value="Dramatic gasp"> Dramatic gasp</label>
+                            <label><input type="radio" name="q1" value="Boing!"> Boing!</label>
+                            <label><input type="radio" name="q1" value="Evil laugh"> Evil laugh</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>2. If I were a weather forecast, I'd be:</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q2" value="100% chill"> 100% chill</label>
+                            <label><input type="radio" name="q2" value="Partly dramatic with a chance of chaos!"> Partly dramatic with a chance of chaos!</label>
+                            <label><input type="radio" name="q2" value="Heatwave vibes"> Heatwave vibes</label>
+                            <label><input type="radio" name="q2" value="Sudden tornado of opinions"> Sudden tornado of opinions</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>3. If I were a breakfast cereal, I'd be:</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q3" value="Jungle Oats"> Jungle Oats</label>
+                            <label><input type="radio" name="q3" value="WeetBix"> WeetBix</label>
+                            <label><input type="radio" name="q3" value="Rice Krispies"> Rice Krispies</label>
+                            <label><input type="radio" name="q3" value="MorVite"> MorVite</label>
+                            <label><input type="radio" name="q3" value="That weird healthy one no-one eats"> That weird healthy one no-one eats</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>4. If I were a bedtime excuse, I'd be...</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q4" value="I need water"> I need water</label>
+                            <label><input type="radio" name="q4" value="There's a spider in my room"> There's a spider in my room</label>
+                            <label><input type="radio" name="q4" value="I can't sleep without &quot;Pillow&quot;"> I can't sleep without "Pillow"</label>
+                            <label><input type="radio" name="q4" value="There see shadows outside my window"> There see shadows outside my window</label>
+                            <label><input type="radio" name="q4" value="Just one more episode"> Just one more episode</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>5. If I were a villain in a movie, I'd be...</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q5" value="Scarlet Overkill"> Scarlet Overkill</label>
+                            <label><input type="radio" name="q5" value="Grinch"> Grinch</label>
+                            <label><input type="radio" name="q5" value="Thanos"> Thanos</label>
+                            <label><input type="radio" name="q5" value="A mosquito in your room at night"> A mosquito in your room at night</label>
+                            <label><input type="radio" name="q5" value="Darth Vader"> Darth Vader</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>6. If I were a kitchen appliance, I'd be...</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q6" value="A blender on high speed with no lid"> A blender on high speed with no lid</label>
+                            <label><input type="radio" name="q6" value="A toaster that only pops when no one’s looking"> A toaster that only pops when no one’s looking</label>
+                            <label><input type="radio" name="q6" value="Microwave that screams when it’s done"> Microwave that screams when it’s done</label>
+                            <label><input type="radio" name="q6" value="A fridge that judges your snack choices"> A fridge that judges your snack choices</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>7. If I were a dance move, I'd be...</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q7" value="The awkward shuffle at weddings"> The awkward shuffle at weddings</label>
+                            <label><input type="radio" name="q7" value="Kwasakwasa, Ba-baah!"> Kwasakwasa, Ba-baah!</label>
+                            <label><input type="radio" name="q7" value="The “I thought no one was watching” move"> The “I thought no one was watching” move</label>
+                            <label><input type="radio" name="q7" value="The knee-pop followed by a regretful sit-down"> The knee-pop followed by a regretful sit-down</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>8. If I were a text message, I'd be...</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q8" value="A typo-ridden voice-to-text disaster"> A typo-ridden voice-to-text disaster</label>
+                            <label><input type="radio" name="q8" value="A three-hour late “LOL”"> A three-hour late “LOL”</label>
+                            <label><input type="radio" name="q8" value="A group chat gif spammer"> A group chat gif spammer</label>
+                            <label><input type="radio" name="q8" value="A mysterious “K.” with no context"> A mysterious “K.” with no context</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>9. If I were a warning label, I'd be...</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q9" value="Caution: May spontaneously break into song"> Caution: May spontaneously break into song</label>
+                            <label><input type="radio" name="q9" value="Contents may cause uncontrollable giggles"> Contents may cause uncontrollable giggles</label>
+                            <label><input type="radio" name="q9" value="Qaphela: Gevaar/Ingozi"> Qaphela: Gevaar/Ingozi</label>
+                            <label><input type="radio" name="q9" value="Warning: Will talk your ear off about random facts"> Warning: Will talk your ear off about random facts</label>
+                            <label><input type="radio" name="q9" value="May contain traces of impulsive decisions"> May contain traces of impulsive decisions</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>10. If I were a type of chair, I’d be…</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q10" value="A Phala Phala sofa"> A Phala Phala sofa</label>
+                            <label><input type="radio" name="q10" value="A creaky antique that screams when you sit"> A creaky antique that screams when you sit</label>
+                            <label><input type="radio" name="q10" value="One of those folding chairs that attack your fingers"> One of those folding chairs that attack your fingers</label>
+                            <label><input type="radio" name="q10" value="A throne made of regrets and snack crumbs"> A throne made of regrets and snack crumbs</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="answer-controls">
+                    <button id="submit-answers" class="btn btn-primary">Submit My Answers</button>
+                </div>
+
+                <div id="waiting-for-others" class="waiting-section" style="display: none;">
+                    <p>✅ Your answers submitted! Waiting for other players...</p>
+                    <div class="waiting-players">
+                        <span id="answers-progress">0/0 players have answered</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Guessing Phase -->
+        <div id="guessing-phase" class="game-phase">
+            <div class="card">
+                <h2>Guess Other Players' Answers</h2>
+                <div class="guessing-info">
+                    <div class="guesser-info">
+                        <span class="your-turn" id="guess-turn-indicator">Your turn to guess!</span>
+                        <span class="score">Score: <span id="current-score">0</span></span>
+                    </div>
+                    <div class="target-info">
+                        <h3>Guess <span id="target-player-name"></span>'s answers:</h3>
+                    </div>
+                </div>
+                
+                <div class="guess-questions">
+                    <div class="guess-question">
+                        <h4>1. If they were a sound effect, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess1" value="Ka-ching!"> Ka-ching!</label>
+                            <label><input type="radio" name="guess1" value="Dramatic gasp"> Dramatic gasp</label>
+                            <label><input type="radio" name="guess1" value="Boing!"> Boing!</label>
+                            <label><input type="radio" name="guess1" value="Evil laugh"> Evil laugh</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>2. If they were a weather forecast, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess2" value="100% chill"> 100% chill</label>
+                            <label><input type="radio" name="guess2" value="Partly dramatic with a chance of chaos!"> Partly dramatic with a chance of chaos!</label>
+                            <label><input type="radio" name="guess2" value="Heatwave vibes"> Heatwave vibes</label>
+                            <label><input type="radio" name="guess2" value="Sudden tornado of opinions"> Sudden tornado of opinions</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>3. If they were a breakfast cereal, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess3" value="Jungle Oats"> Jungle Oats</label>
+                            <label><input type="radio" name="guess3" value="WeetBix"> WeetBix</label>
+                            <label><input type="radio" name="guess3" value="Rice Krispies"> Rice Krispies</label>
+                            <label><input type="radio" name="guess3" value="MorVite"> MorVite</label>
+                            <label><input type="radio" name="guess3" value="That weird healthy one no-one eats"> That weird healthy one no-one eats</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>4. If they were a bedtime excuse, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess4" value="I need water"> I need water</label>
+                            <label><input type="radio" name="guess4" value="There's a spider in my room"> There's a spider in my room</label>
+                            <label><input type="radio" name="guess4" value="I can't sleep without &quot;Pillow&quot;"> I can't sleep without "Pillow"</label>
+                            <label><input type="radio" name="guess4" value="There see shadows outside my window"> There see shadows outside my window</label>
+                            <label><input type="radio" name="guess4" value="Just one more episode"> Just one more episode</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>5. If they were a villain in a movie, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess5" value="Scarlet Overkill"> Scarlet Overkill</label>
+                            <label><input type="radio" name="guess5" value="Grinch"> Grinch</label>
+                            <label><input type="radio" name="guess5" value="Thanos"> Thanos</label>
+                            <label><input type="radio" name="guess5" value="A mosquito in your room at night"> A mosquito in your room at night</label>
+                            <label><input type="radio" name="guess5" value="Darth Vader"> Darth Vader</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>6. If they were a kitchen appliance, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess6" value="A blender on high speed with no lid"> A blender on high speed with no lid</label>
+                            <label><input type="radio" name="guess6" value="A toaster that only pops when no one’s looking"> A toaster that only pops when no one’s looking</label>
+                            <label><input type="radio" name="guess6" value="Microwave that screams when it’s done"> Microwave that screams when it’s done</label>
+                            <label><input type="radio" name="guess6" value="A fridge that judges your snack choices"> A fridge that judges your snack choices</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>7. If they were a dance move, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess7" value="The awkward shuffle at weddings"> The awkward shuffle at weddings</label>
+                            <label><input type="radio" name="guess7" value="Kwasakwasa, Ba-baah!"> Kwasakwasa, Ba-baah!</label>
+                            <label><input type="radio" name="guess7" value="The “I thought no one was watching” move"> The “I thought no one was watching” move</label>
+                            <label><input type="radio" name="guess7" value="The knee-pop followed by a regretful sit-down"> The knee-pop followed by a regretful sit-down</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>8. If they were a text message, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess8" value="A typo-ridden voice-to-text disaster"> A typo-ridden voice-to-text disaster</label>
+                            <label><input type="radio" name="guess8" value="A three-hour late “LOL”"> A three-hour late “LOL”</label>
+                            <label><input type="radio" name="guess8" value="A group chat gif spammer"> A group chat gif spammer</label>
+                            <label><input type="radio" name="guess8" value="A mysterious “K.” with no context"> A mysterious “K.” with no context</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>9. If they were a warning label, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess9" value="Caution: May spontaneously break into song"> Caution: May spontaneously break into song</label>
+                            <label><input type="radio" name="guess9" value="Contents may cause uncontrollable giggles"> Contents may cause uncontrollable giggles</label>
+                            <label><input type="radio" name="guess9" value="Qaphela: Gevaar/Ingozi"> Qaphela: Gevaar/Ingozi</label>
+                            <label><input type="radio" name="guess9" value="Warning: Will talk your ear off about random facts"> Warning: Will talk your ear off about random facts</label>
+                            <label><input type="radio" name="guess9" value="May contain traces of impulsive decisions"> May contain traces of impulsive decisions</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>10. If they were a type of chair, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess10" value="A Phala Phala sofa"> A Phala Phala sofa</label>
+                            <label><input type="radio" name="guess10" value="A creaky antique that screams when you sit"> A creaky antique that screams when you sit</label>
+                            <label><input type="radio" name="guess10" value="One of those folding chairs that attack your fingers"> One of those folding chairs that attack your fingers</label>
+                            <label><input type="radio" name="guess10" value="A throne made of regrets and snack crumbs"> A throne made of regrets and snack crumbs</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="guess-controls">
+                    <button id="submit-guesses" class="btn btn-primary">Submit Guesses</button>
+                </div>
+
+                <div id="waiting-for-guesses" class="waiting-section" style="display: none;">
+                    <p>✅ Your guesses submitted! Waiting for other players...</p>
+                    <div class="guessing-progress">
+                        <span id="guesses-progress">0/0 guesses completed</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Round Reveal Overlay (shown between guessing rounds) -->
+        <div id="round-overlay" class="round-overlay" style="display: none;">
+            <div class="round-content">
+                <h2>Round Reveal</h2>
+                <p class="round-subtitle">Actual answers for <strong id="reveal-target-name"></strong></p>
+
+                <div class="reveal-answers">
+                    <ul id="reveal-answers-list"></ul>
+                </div>
+
+                <div class="reveal-scores">
+                    <h3>Scores this round</h3>
+                    <ul id="reveal-scores-list"></ul>
+                </div>
+
+                <p class="countdown">Next round in <span id="reveal-countdown">5</span>…</p>
+                <div class="reveal-actions">
+                    <button id="continue-reveal" class="btn btn-primary" style="display: none;">Continue</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Phase -->
+        <div id="results-phase" class="game-phase">
+            <div class="card">
+                <h2>🏆 Game Results</h2>
+                <div class="winner-announcement">
+                    <h3 id="winner-text"></h3>
+                </div>
+                
+                <div class="final-scores">
+                    <h3>Final Scores:</h3>
+                    <ul id="scores-list"></ul>
+                </div>
+
+                <div class="player-answers">
+                    <h3>Everyone's Answers:</h3>
+                    <div id="all-answers"></div>
+                </div>
+
+                <div class="accuracy-summary">
+                    <h3>Accuracy by Target</h3>
+                    <div id="accuracy-summary"></div>
+                </div>
+
+                <div class="game-controls">
+                    <button id="copy-summary" class="btn btn-primary">Copy Winner Summary</button>
+                    <label style="display:inline-flex; align-items:center; gap:8px; margin-left:8px;">
+                        <input type="checkbox" id="mute-celebrations"> Mute celebration effects
+                    </label>
+                    <button id="play-again" class="btn btn-success">Play Again</button>
+                    <button id="leave-game" class="btn btn-secondary">Leave Game</button>
+                </div>
+            </div>
+            <!-- Fireworks container overlay -->
+            <div id="fireworks" class="fireworks" aria-hidden="true"></div>
+        </div>
+
+        <!-- Error Messages -->
+        <div id="error-overlay" class="error-overlay" style="display: none;">
+            <div class="error-content">
+                <h3>⚠️ Error</h3>
+                <p id="error-message"></p>
+                <button id="close-error" class="btn btn-primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
