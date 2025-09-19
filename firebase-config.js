@@ -11,7 +11,7 @@ const firebaseConfig = {
 
 // Initialize Firebase
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js';
-import { getDatabase, ref, onValue, set, get, update, remove } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js';
+import { getDatabase, ref, onValue, set, get, update, remove, onDisconnect } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js';
 
 // Initialize Firebase
 let app;
@@ -20,9 +20,23 @@ let database;
 try {
     app = initializeApp(firebaseConfig);
     database = getDatabase(app);
+    
+    // Make Firebase available globally for debugging
+    window.firebase = {
+        database: database,
+        ref: ref,
+        onValue: onValue,
+        set: set,
+        get: get,
+        update: update,
+        remove: remove,
+        onDisconnect: onDisconnect
+    };
+    
     console.log('Firebase initialized successfully');
 } catch (error) {
     console.error('Error initializing Firebase:', error);
+    throw error; // Re-throw to prevent the app from starting with a broken Firebase connection
 }
 
-export { database, ref, onValue, set, get, update, remove, app as default };
+export { app, database, ref, onValue, set, get, update, remove, onDisconnect };

@@ -6,23 +6,30 @@
     <title>If I Were... - Multiplayer Game</title>
     <link rel="stylesheet" href="styles.css">
     <!-- Firebase SDK -->
+    <!-- Load Firebase SDKs first -->
     <script type="module">
-        import { database, ref, onValue, set, get, update, remove } from './firebase-config.js';
+        // Import the game class
+        import { MultiplayerIfIWereGame } from './script.js';
         
-        // Make Firebase available globally for the game
-        window.firebase = {
-            database,
-            ref,
-            onValue,
-            set,
-            get,
-            update,
-            remove
-        };
-        
-        // Initialize the game after Firebase is ready
+        // Initialize the game after the page loads
         document.addEventListener('DOMContentLoaded', () => {
-            new MultiplayerIfIWereGame();
+            // Create the game instance
+            const game = new MultiplayerIfIWereGame();
+            
+            // Make it available globally for debugging
+            window.game = game;
+            
+            console.log('Game initialized');
+            
+            // Check if we have a room code in the URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomCode = urlParams.get('room');
+            
+            if (roomCode) {
+                // If we have a room code, try to join the room
+                const playerName = localStorage.getItem('playerName') || 'Player';
+                game.joinGame(roomCode, playerName);
+            }
         });
     </script>
 </head>

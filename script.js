@@ -1,4 +1,5 @@
-class MultiplayerIfIWereGame {
+// Export the game class for use in other modules
+export class MultiplayerIfIWereGame {
     constructor() {
         // Initialize Firebase first
         this.initFirebase();
@@ -77,34 +78,47 @@ class MultiplayerIfIWereGame {
 
     initFirebase() {
         try {
-            // Use the Firebase instance from the global scope
-            if (window.firebase && window.firebase.database) {
+            // Import Firebase modules
+            import('./firebase-config.js').then(firebaseModule => {
                 // Store database methods for later use
-                this.database = window.firebase.database;
-                this.firebaseRef = window.firebase.ref;
-                this.firebaseOnValue = window.firebase.onValue;
-                this.firebaseSet = window.firebase.set;
-                this.firebaseGet = window.firebase.get;
-                this.firebaseUpdate = window.firebase.update;
-                this.firebaseRemove = window.firebase.remove;
+                this.database = firebaseModule.database;
+                this.firebaseRef = firebaseModule.ref;
+                this.firebaseOnValue = firebaseModule.onValue;
+                this.firebaseSet = firebaseModule.set;
+                this.firebaseGet = firebaseModule.get;
+                this.firebaseUpdate = firebaseModule.update;
+                this.firebaseRemove = firebaseModule.remove;
+                this.firebaseOnDisconnect = firebaseModule.onDisconnect;
                 
                 this.firebaseReady = true;
                 console.log('Firebase initialized successfully');
                 
-                // Test Firebase connection
-                const connectedRef = this.firebaseRef(this.database, '.info/connected');
-                this.firebaseOnValue(connectedRef, (snapshot) => {
-                    if (snapshot.val() === true) {
-                        console.log('✅ Firebase connected');
-                    } else {
-                        console.log('❌ Firebase disconnected');
-                    }
-                });
-            } else {
-                throw new Error('Firebase not available in window object');
-            }
+                // Test Firebase connection if we have a room code
+                if (this.gameState.roomCode) {
+                    const connectedRef = this.firebaseRef(this.database, '.info/connected');
+                    this.firebaseOnValue(connectedRef, (snapshot) => {
+                        if (snapshot.val() === true) {
+                            console.log('✅ Firebase connected');
+                            // Re-setup game listener if we were disconnected
+                            if (this.gameState.roomCode) {
+                                this.setupGameListener();
+                            }
+                        } else {
+                            console.log('❌ Firebase disconnected');
+                        }
+                    });
+                }
+                
+                // Initialize the game if we're in the setup phase
+                if (this.gameState.phase === 'initial-setup') {
+                    this.initializeEventListeners();
+                }
+            }).catch(error => {
+                console.error('Failed to load Firebase modules:', error);
+                this.firebaseReady = false;
+            });
         } catch (error) {
-            console.warn('Firebase failed, using localStorage fallback:', error);
+            console.warn('Firebase initialization failed, using localStorage fallback:', error);
             this.firebaseReady = false;
         }
     }
@@ -471,6 +485,20 @@ Just give them the room code: ${this.gameState.roomCode}
                     url: window.location.href
                 }).catch(err => {
                     console.log('Error sharing:', err);
+                    // Fallback to copy to clipboard
+                    navigator.clipboard.writeText(`Join my "If I Were..." game!\nRoom code: ${this.gameState.roomCode}\n${window.location.href}`)
+                        .then(() => {
+                            const originalText = shareButton.textContent;
+                            shareButton.textContent = '✅ Link copied!';
+                            setTimeout(() => {
+                                shareButton.textContent = originalText;
+                            }, 2000);
+                        })
+                        .catch(copyErr => {
+                            console.error('Failed to copy room code:', copyErr);
+                            // Last resort - show a prompt
+                            prompt('Copy this link to share:', `${window.location.href}?room=${this.gameState.roomCode}`);
+                        });
                 });
             };
         }
@@ -519,39 +547,29 @@ Just give them the room code: ${this.gameState.roomCode}
                     hostNote.textContent = 'Waiting for host to start the game...';
                 }
             }
-            
-            // Hide start button for non-hosts
-            if (startButton) {
-                startButton.style.display = 'none';
+            // Player-specific UI updates
+            if (hostNote) {
+                if (this.gameState.players.length < 2) {
+                    hostNote.textContent = `Waiting for ${2 - this.gameState.players.length} more player(s) to join...`;
+                } else if (this.gameState.players.length >= this.gameState.maxPlayers) {
+                    hostNote.textContent = 'All players joined! Waiting for host to start...';
+                } else {
+                    hostNote.textContent = 'Waiting for host to start the game...';
+                }
             }
         }
-    }
-    }
-
-    copyRoomCode() {
-        const textToCopy = `Join my "If I Were..." game!\n\n🎮 Room Code: ${this.gameState.roomCode}\n\n📱 Instructions:\n1. Go to: ${window.location.origin}${window.location.pathname}\n2. Enter room code: ${this.gameState.roomCode}\n3. Enter your name and join!\n\n✅ Works on any device!`;
-        
-        navigator.clipboard.writeText(textToCopy).then(() => {
-            const copyBtn = document.getElementById('copy-code');
-            const originalText = copyBtn.textContent;
-            copyBtn.textContent = '✅';
-            setTimeout(() => {
-                copyBtn.textContent = originalText;
-            }, 2000);
-        }).catch(() => {
-            prompt('Copy this text and share with players:', textToCopy);
-        });
     }
 
     // Build accuracy summary by target and render into #accuracy-summary
     renderAccuracySummary() {
         const wrap = document.getElementById('accuracy-summary');
         if (!wrap) return;
+        
         wrap.innerHTML = '';
         const players = this.gameState.players || [];
         const guesses = this.gameState.guesses || {};
         const answers = this.gameState.playerAnswers || {};
-        players.forEach(target => {
+        players.forEach((target) => {
             const targetName = target.name;
             const targetAnswers = answers[targetName];
             if (!targetAnswers) return;
@@ -564,12 +582,14 @@ Just give them the room code: ${this.gameState.roomCode}
             ul.style.listStyle = 'none';
             ul.style.padding = '0';
             const targetGuesses = guesses[targetName] || {};
-            players.forEach(p => {
+            players.forEach((p) => {
                 if (p.name === targetName) return; // target doesn't guess
                 const g = targetGuesses[p.name];
                 let correct = 0;
                 if (g) {
-                    this.questions.forEach(q => { if (g[q.id] === targetAnswers[q.id]) correct++; });
+                    this.questions.forEach((q) => { 
+                        if (g[q.id] === targetAnswers[q.id]) correct++; 
+                    });
                 }
                 const li = document.createElement('li');
                 const total = this.questions.length;
@@ -583,9 +603,9 @@ Just give them the room code: ${this.gameState.roomCode}
 
     // Copy a concise summary of winners and final scores
     async copyWinnerSummary() {
-        const scores = Object.entries(this.gameState.scores || {}).sort(([,a], [,b]) => b - a);
+        const scores = Object.entries(this.gameState.scores || {}).sort(([, a], [, b]) => b - a);
         const maxScore = scores.length ? scores[0][1] : 0;
-        const winners = scores.filter(([,s]) => s === maxScore).map(([n]) => n);
+        const winners = scores.filter(([, s]) => s === maxScore).map(([n]) => n);
         const title = winners.length === 1 ? `Winner: ${winners[0]} (${maxScore} points)` : `Tie: ${winners.join(' & ')} (${maxScore} points)`;
         const lines = scores.map(([n,s]) => `- ${n}: ${s}`);
         const text = [`If I Were... Results`, title, ...lines].join('\n');
@@ -633,502 +653,204 @@ Just give them the room code: ${this.gameState.roomCode}
             document.getElementById('turn-indicator').textContent = 'Answer the questions!';
             document.getElementById('current-answerer').textContent = 'Everyone';
             document.getElementById('submit-answers').style.display = 'block';
-            document.getElementById('waiting-for-others').style.display = 'none';
         }
-        
-        // Update progress
-        const answeredCount = Object.keys(this.gameState.playerAnswers).length;
-        document.getElementById('answers-progress').textContent = `${answeredCount}/${this.gameState.players.length} players have answered`;
     }
 
-    async submitAnswers() {
-        const answers = {};
-        this.questions.forEach(question => {
-            const selected = document.querySelector(`input[name="${question.id}"]:checked`);
-            if (selected) {
-                answers[question.id] = selected.value;
+    // Handle host-specific UI updates
+    updateHostUI() {
+        const startButton = document.getElementById('start-game');
+        const hostNote = document.getElementById('host-note');
+
+        if (!this.gameState || !this.gameState.isHost) {
+            // Hide start button for non-hosts
+            if (startButton) {
+                startButton.style.display = 'none';
             }
-        });
-        
-        if (Object.keys(answers).length !== this.questions.length) {
-            this.showError('Please answer all questions before submitting.');
             return;
         }
-        
-        // Save answers
-        this.gameState.playerAnswers[this.gameState.playerName] = answers;
-        
-        // Check if all players have answered
-        if (Object.keys(this.gameState.playerAnswers).length === this.gameState.players.length) {
-            // All players have answered, move to guessing phase (round-based by target)
-            this.gameState.phase = 'guessing';
-            this.gameState.currentTarget = 0; // Start with the first player as target
-            this.gameState.guesses = {}; // Reset guesses map: { [targetName]: { [guesserName]: answers } }
+
+        // Host-specific UI updates
+        if (startButton) {
+            const canStart = this.gameState.players && 
+                           this.gameState.players.length >= 2 && 
+                           this.gameState.players.length <= (this.gameState.maxPlayers || 8);
+            
+            startButton.disabled = !canStart;
+            startButton.style.display = canStart ? 'block' : 'none';
+            startButton.style.visibility = canStart ? 'visible' : 'hidden';
+            
+            // Update button text and host note based on player count
+            if (this.gameState.players.length < 2) {
+                startButton.textContent = 'Waiting for more players...';
+                if (hostNote) {
+                    hostNote.textContent = `Need ${2 - this.gameState.players.length} more players to start`;
+                }
+            } else if (this.gameState.players.length >= (this.gameState.maxPlayers || 8)) {
+                startButton.textContent = 'Start Game';
+                if (hostNote) {
+                    hostNote.textContent = 'All players joined! Ready to start.';
+                }
+                console.log('✅ Start button shown - room is full!');
+            } else {
+                startButton.textContent = 'Start Game';
+                if (hostNote) {
+                    hostNote.textContent = 'Ready to start!';
+                }
+            }
+        } else {
+            // Player-specific UI updates
+            if (hostNote) {
+                if (this.gameState.players.length < 2) {
+                    hostNote.textContent = `Waiting for ${2 - this.gameState.players.length} more player(s) to join...`;
+                } else if (this.gameState.players.length >= (this.gameState.maxPlayers || 8)) {
+                    hostNote.textContent = 'All players joined! Waiting for host to start...';
+                } else {
+                    hostNote.textContent = 'Waiting for host to start the game...';
+                }
+            }
+            
+            // Hide start button for non-hosts
+            if (startButton) {
+                startButton.style.display = 'none';
+            }
         }
-        
-        await this.saveGameState();
-        
+}
+
+// ... (rest of the code remains the same)
+
+// Update the game state with new answers from the current player
+submitAnswers() {
+    const answers = {};
+    this.questions.forEach(question => {
+        const selected = document.querySelector(`input[name="${question.id}"]:checked`);
+        if (selected) {
+            answers[question.id] = selected.value;
+        }
+    });
+
+    if (Object.keys(answers).length !== this.questions.length) {
+        this.showError('Please answer all questions before submitting.');
+        return;
+    }
+
+    // Save answers
+    this.gameState.playerAnswers[this.gameState.playerName] = answers;
+
+    // Check if all players have answered
+    if (Object.keys(this.gameState.playerAnswers).length === this.gameState.players.length) {
+        // All players have answered, move to guessing phase (round-based by target)
+        this.gameState.phase = 'guessing';
+        this.gameState.currentTarget = 0; // Start with the first player as target
+        this.gameState.guesses = {}; // Reset guesses map: { [targetName]: { [guesserName]: answers } }
+    }
+
+    this.saveGameState().then(() => {
         if (this.gameState.phase === 'guessing') {
             this.showGuessingPhase();
         } else {
             this.updateAnswerPhase();
         }
+    });
+}
+
+// ... (rest of the code remains the same)
+
+// Update the game state with new guesses from the current player
+submitGuesses() {
+    const myGuesses = {};
+    this.questions.forEach((question, index) => {
+        const selected = document.querySelector(`input[name="guess${index + 1}"]:checked`);
+        if (selected) {
+            myGuesses[question.id] = selected.value;
+        }
+    });
+
+    if (Object.keys(myGuesses).length !== this.questions.length) {
+        this.showError('Please make all guesses before submitting.');
+        return;
     }
 
-    showGuessingPhase() {
-        this.showPhase('guessing-phase');
-        this.updateGuessingPhase();
-        if (this.gameState.reveal) {
-            this.showRoundOverlay(this.gameState.reveal);
-            this.scheduleAutoAdvanceIfHost();
-        } else {
-            this.hideRoundOverlay();
-        }
-    }
+    const targetPlayer = this.gameState.players[this.gameState.currentTarget];
 
-    updateGuessingPhase() {
-        const targetPlayer = this.gameState.players[this.gameState.currentTarget];
-        if (!targetPlayer) {
-            console.log('⚠️ No target player found for currentTarget=', this.gameState.currentTarget);
-            return;
-        }
-        const me = this.gameState.playerName;
-        const myScore = this.gameState.scores[me] || 0;
+    if (this.firebaseReady && this.gameState.roomCode) {
+        // Use a Firebase transaction to avoid overwriting concurrent guesses/scores
+        this.database.ref(`games/${this.gameState.roomCode}`).transaction(current => {
+            if (!current) return current;
+            if (!current.guesses) current.guesses = {};
+            if (!current.guesses[targetPlayer.name]) current.guesses[targetPlayer.name] = {};
 
-        document.getElementById('target-player-name').textContent = targetPlayer.name;
-        document.getElementById('current-score').textContent = myScore;
+            // Save my guesses
+            current.guesses[targetPlayer.name][this.gameState.playerName] = myGuesses;
 
-        const isTarget = targetPlayer.name === me;
-        const targetGuesses = (this.gameState.guesses && this.gameState.guesses[targetPlayer.name]) || {};
-        const hasSubmitted = !!targetGuesses[me];
+            const submittedCount = Object.keys(current.guesses[targetPlayer.name]).length;
+            const requiredCount = (current.players ? current.players.length : this.gameState.players.length) - 1;
 
-        // Reference to guess questions container
-        const guessQuestions = document.querySelector('.guess-questions');
-
-        if (isTarget) {
-            // Target does not guess their own answers
-            const pendingNames = this.gameState.players
-                .filter(p => p.name !== targetPlayer.name)
-                .filter(p => !targetGuesses[p.name])
-                .map(p => p.name);
-            const pendingText = pendingNames.length
-                ? `Waiting for: ${pendingNames.join(', ')}`
-                : 'All guesses received.';
-            document.getElementById('guess-turn-indicator').textContent = pendingText;
-            document.getElementById('submit-guesses').style.display = 'none';
-            document.getElementById('waiting-for-guesses').style.display = 'block';
-            if (guessQuestions) guessQuestions.style.display = 'none';
-        } else if (!hasSubmitted) {
-            // I need to submit my guesses for the current target
-            document.getElementById('guess-turn-indicator').textContent = 'Your turn to guess!';
-            document.getElementById('submit-guesses').style.display = 'block';
-            document.getElementById('waiting-for-guesses').style.display = 'none';
-            // Clear selections only when target changes to avoid wiping user choices mid-round
-            const currentTargetName = targetPlayer.name;
-            if (this.lastGuessTargetName !== currentTargetName) {
-                this.questions.forEach((_, index) => {
-                    const inputs = document.querySelectorAll(`input[name="guess${index + 1}"]`);
-                    inputs.forEach(i => { i.checked = false; });
-                });
-                this.lastGuessTargetName = currentTargetName;
-            }
-            if (guessQuestions) guessQuestions.style.display = 'block';
-        } else {
-            // I already submitted; wait for the rest
-            document.getElementById('guess-turn-indicator').textContent = `Waiting for other players...`;
-            document.getElementById('submit-guesses').style.display = 'none';
-            document.getElementById('waiting-for-guesses').style.display = 'block';
-            if (guessQuestions) guessQuestions.style.display = 'none';
-        }
-
-        // Update guesses progress text (e.g., "2/3 guesses completed")
-        const submittedCount = Object.keys(targetGuesses).length;
-        const requiredCount = this.gameState.players.length - 1; // everyone except target
-        const guessesProgress = document.getElementById('guesses-progress');
-        if (guessesProgress) {
-            guessesProgress.textContent = `${submittedCount}/${requiredCount} guesses completed`;
-        }
-    }
-
-    async submitGuesses() {
-        const myGuesses = {};
-        this.questions.forEach((question, index) => {
-            const selected = document.querySelector(`input[name="guess${index + 1}"]:checked`);
-            if (selected) {
-                myGuesses[question.id] = selected.value;
-            }
-        });
-
-        if (Object.keys(myGuesses).length !== this.questions.length) {
-            this.showError('Please make all guesses before submitting.');
-            return;
-        }
-
-        const targetPlayer = this.gameState.players[this.gameState.currentTarget];
-
-        if (this.firebaseReady && this.gameState.roomCode) {
-            // Use a Firebase transaction to avoid overwriting concurrent guesses/scores
-            await this.database.ref(`games/${this.gameState.roomCode}`).transaction(current => {
-                if (!current) return current;
-                if (!current.guesses) current.guesses = {};
-                if (!current.guesses[targetPlayer.name]) current.guesses[targetPlayer.name] = {};
-
-                // Save my guesses
-                current.guesses[targetPlayer.name][this.gameState.playerName] = myGuesses;
-
-                const submittedCount = Object.keys(current.guesses[targetPlayer.name]).length;
-                const requiredCount = (current.players ? current.players.length : this.gameState.players.length) - 1;
-
-                if (submittedCount >= requiredCount) {
-                    // Compute and apply round scores
-                    const targetAnswers = (current.playerAnswers && current.playerAnswers[targetPlayer.name]) || this.gameState.playerAnswers[targetPlayer.name];
-                    const roundScores = {};
-                    Object.entries(current.guesses[targetPlayer.name]).forEach(([guesserName, guesses]) => {
-                        if (guesserName === targetPlayer.name) return;
-                        let correct = 0;
-                        this.questions.forEach(q => {
-                            if (guesses[q.id] === targetAnswers[q.id]) correct++;
-                        });
-                        const delta = correct - (this.questions.length - correct);
-                        roundScores[guesserName] = delta;
-                        if (!current.scores) current.scores = {};
-                        current.scores[guesserName] = (current.scores[guesserName] || 0) + delta;
-                    });
-
-                    // Reveal with countdown
-                    const durationMs = 5000;
-                    const until = Date.now() + durationMs;
-                    current.reveal = {
-                        target: targetPlayer.name,
-                        answers: (targetAnswers || {}),
-                        scores: roundScores,
-                        until
-                    };
-                }
-
-                return current;
-            });
-
-            // UI updates will be driven by the Firebase listener (show overlay, schedule advance)
-        } else {
-            // Fallback local (no Firebase): previous behavior
-            if (!this.gameState.guesses) this.gameState.guesses = {};
-            if (!this.gameState.guesses[targetPlayer.name]) this.gameState.guesses[targetPlayer.name] = {};
-            this.gameState.guesses[targetPlayer.name][this.gameState.playerName] = myGuesses;
-
-            const submittedCount = Object.keys(this.gameState.guesses[targetPlayer.name]).length;
-            const requiredCount = this.gameState.players.length - 1;
             if (submittedCount >= requiredCount) {
-                const targetAnswers = this.gameState.playerAnswers[targetPlayer.name];
+                // Compute and apply round scores
+                const targetAnswers = (current.playerAnswers && current.playerAnswers[targetPlayer.name]) || this.gameState.playerAnswers[targetPlayer.name];
                 const roundScores = {};
-                for (const [guesserName, guesses] of Object.entries(this.gameState.guesses[targetPlayer.name])) {
-                    if (guesserName === targetPlayer.name) continue;
+                Object.entries(current.guesses[targetPlayer.name]).forEach(([guesserName, guesses]) => {
+                    if (guesserName === targetPlayer.name) return;
                     let correct = 0;
                     this.questions.forEach(q => {
                         if (guesses[q.id] === targetAnswers[q.id]) correct++;
                     });
                     const delta = correct - (this.questions.length - correct);
                     roundScores[guesserName] = delta;
-                    this.gameState.scores[guesserName] = (this.gameState.scores[guesserName] || 0) + delta;
-                }
+                    if (!current.scores) current.scores = {};
+                    current.scores[guesserName] = (current.scores[guesserName] || 0) + delta;
+                });
+
+                // Reveal with countdown
                 const durationMs = 5000;
                 const until = Date.now() + durationMs;
-                this.gameState.reveal = { target: targetPlayer.name, answers: targetAnswers, scores: roundScores, until };
+                current.reveal = {
+                    target: targetPlayer.name,
+                    answers: (targetAnswers || {}),
+                    scores: roundScores,
+                    until
+                };
             }
 
-            await this.saveGameState();
+            return current;
+        }).then(() => {
+            // UI updates will be driven by the Firebase listener (show overlay, schedule advance)
+        });
+    } else {
+        // Fallback local (no Firebase): previous behavior
+        if (!this.gameState.guesses) this.gameState.guesses = {};
+        if (!this.gameState.guesses[targetPlayer.name]) this.gameState.guesses[targetPlayer.name] = {};
+        this.gameState.guesses[targetPlayer.name][this.gameState.playerName] = myGuesses;
 
+        const submittedCount = Object.keys(this.gameState.guesses[targetPlayer.name]).length;
+        const requiredCount = this.gameState.players.length - 1;
+        if (submittedCount >= requiredCount) {
+            const targetAnswers = this.gameState.playerAnswers[targetPlayer.name];
+            const roundScores = {};
+            for (const [guesserName, guesses] of Object.entries(this.gameState.guesses[targetPlayer.name])) {
+                if (guesserName === targetPlayer.name) continue;
+                let correct = 0;
+                this.questions.forEach(q => {
+                    if (guesses[q.id] === targetAnswers[q.id]) correct++;
+                });
+                const delta = correct - (this.questions.length - correct);
+                roundScores[guesserName] = delta;
+                this.gameState.scores[guesserName] = (this.gameState.scores[guesserName] || 0) + delta;
+            }
+            const durationMs = 5000;
+            const until = Date.now() + durationMs;
+            this.gameState.reveal = { target: targetPlayer.name, answers: targetAnswers, scores: roundScores, until };
+        }
+
+        this.saveGameState().then(() => {
             if (this.gameState.reveal) {
                 this.showRoundOverlay(this.gameState.reveal);
                 this.scheduleAutoAdvanceIfHost();
             } else {
                 this.updateGuessingPhase();
             }
-        }
-    }
-
-    moveToNextGuess() {
-        // No-op: replaced by round-based flow handled in submitGuesses()
-    }
-
-    showResults() {
-        this.showPhase('results-phase');
-        this.displayResults();
-        const mute = (document.getElementById('mute-celebrations')?.checked) || localStorage.getItem('mute_celebrations') === 'true';
-        if (!mute) this.triggerFireworks(7000);
-    }
-
-    // ----- Round Reveal UI -----
-    showRoundOverlay(reveal) {
-        const overlay = document.getElementById('round-overlay');
-        if (!overlay) return;
-
-        // Target name
-        const targetNameEl = document.getElementById('reveal-target-name');
-        if (targetNameEl) targetNameEl.textContent = reveal.target;
-
-        // Actual answers list
-        const answersUl = document.getElementById('reveal-answers-list');
-        if (answersUl) {
-            answersUl.innerHTML = '';
-            this.questions.forEach((q, idx) => {
-                const li = document.createElement('li');
-                li.innerHTML = `<strong>${idx + 1}.</strong> ${reveal.answers[q.id]}`;
-                answersUl.appendChild(li);
-            });
-        }
-
-        // Round scores list
-        const scoresUl = document.getElementById('reveal-scores-list');
-        if (scoresUl) {
-            scoresUl.innerHTML = '';
-            // Show only participants (everyone except target)
-            this.gameState.players.forEach(p => {
-                if (p.name === reveal.target) return;
-                const delta = reveal.scores[p.name] || 0;
-                const li = document.createElement('li');
-                li.innerHTML = `<span>${p.name}</span><span>${delta >= 0 ? '+' : ''}${delta}</span>`;
-                scoresUl.appendChild(li);
-            });
-        }
-
-        // Countdown
-        const countdownEl = document.getElementById('reveal-countdown');
-        if (countdownEl && reveal.until) {
-            const tick = () => {
-                const remaining = Math.max(0, Math.ceil((reveal.until - Date.now()) / 1000));
-                countdownEl.textContent = String(remaining);
-                if (remaining > 0 && this.gameState.reveal) {
-                    this._revealTimer = setTimeout(tick, 250);
-                }
-            };
-            if (this._revealTimer) clearTimeout(this._revealTimer);
-            tick();
-        }
-
-        // Host-only Continue button visibility
-        const continueBtn = document.getElementById('continue-reveal');
-        if (continueBtn) {
-            continueBtn.style.display = this.gameState.isHost ? 'inline-block' : 'none';
-        }
-
-        overlay.style.display = 'flex';
-    }
-
-    hideRoundOverlay() {
-        const overlay = document.getElementById('round-overlay');
-        if (!overlay) return;
-        if (this._revealTimer) clearTimeout(this._revealTimer);
-        overlay.style.display = 'none';
-    }
-
-    // Host-only: advance to the next target or to the results phase
-    async advanceToNextRound() {
-        if (!this.gameState.isHost || !this.gameState.reveal) return;
-
-        // Clear any pending timers to prevent double execution
-        if (this._advanceTimer) clearTimeout(this._advanceTimer);
-        this._advanceTimer = null;
-
-        this.gameState.reveal = null;
-        this.gameState.currentTarget += 1;
-        if (this.gameState.currentTarget >= this.gameState.players.length) {
-            this.gameState.phase = 'results';
-        }
-
-        await this.saveGameState();
-
-        if (this.gameState.phase === 'results') {
-            this.showResults();
-        } else {
-            this.updateGuessingPhase();
-        }
-    }
-
-    displayResults() {
-        const scores = this.gameState.scores || {};
-        const scoreValues = Object.values(scores);
-        const maxScore = scoreValues.length ? Math.max(...scoreValues) : 0;
-        const winners = Object.entries(scores)
-            .filter(([_, score]) => score === maxScore)
-            .map(([name]) => name);
-        
-        const winnerText = winners.length === 1 
-            ? `🎉 Congratulations, ${winners[0]}! You win with ${maxScore} points! 🎆`
-            : `🎉 It's a tie! Congrats to ${winners.join(' and ')} with ${maxScore} points! 🎆`;
-        
-        const winnerEl = document.getElementById('winner-text');
-        if (winnerEl) winnerEl.textContent = winnerText;
-        
-        const scoresList = document.getElementById('scores-list');
-        scoresList.innerHTML = '';
-        
-        const sortedScores = Object.entries(this.gameState.scores)
-            .sort(([,a], [,b]) => b - a);
-        
-        sortedScores.forEach(([playerName, score]) => {
-            const li = document.createElement('li');
-            li.textContent = `${playerName}: ${score} points`;
-            if (winners.includes(playerName)) {
-                li.style.fontWeight = 'bold';
-                li.style.color = '#4CAF50';
-            }
-            scoresList.appendChild(li);
-        });
-        
-        this.displayAllAnswers();
-
-        // Accuracy summary by target
-        this.renderAccuracySummary();
-    }
-
-    // ----- Fireworks / Confetti -----
-    triggerFireworks(durationMs = 6000) {
-        const container = document.getElementById('fireworks');
-        if (!container) return;
-        container.innerHTML = '';
-        container.style.display = 'block';
-
-        const colors = ['#ff4757', '#ffa502', '#2ed573', '#1e90ff', '#a55eea', '#ff6b81'];
-        const createPiece = () => {
-            const piece = document.createElement('div');
-            piece.className = 'confetti';
-            const size = 8 + Math.random() * 8;
-            piece.style.width = `${size}px`;
-            piece.style.height = `${size * 1.6}px`;
-            piece.style.left = `${Math.random() * 100}%`;
-            piece.style.background = colors[Math.floor(Math.random() * colors.length)];
-            piece.style.animationDuration = `${3 + Math.random() * 3}s`;
-            piece.style.animationDelay = `${Math.random() * 1}s`;
-            piece.style.transform = `rotate(${Math.random() * 360}deg)`;
-            container.appendChild(piece);
-        };
-
-        // spawn bursts
-        const burst = () => {
-            for (let i = 0; i < 30; i++) createPiece();
-        };
-        burst();
-        this._fireworksInterval = setInterval(burst, 1000);
-
-        if (this._fireworksTimeout) clearTimeout(this._fireworksTimeout);
-        this._fireworksTimeout = setTimeout(() => this.stopFireworks(), durationMs);
-    }
-
-    stopFireworks() {
-        const container = document.getElementById('fireworks');
-        if (this._fireworksInterval) clearInterval(this._fireworksInterval);
-        if (this._fireworksTimeout) clearTimeout(this._fireworksTimeout);
-        this._fireworksInterval = null;
-        this._fireworksTimeout = null;
-        if (container) {
-            container.style.display = 'none';
-            container.innerHTML = '';
-        }
-    }
-
-    displayAllAnswers() {
-        const answersContainer = document.getElementById('all-answers');
-        answersContainer.innerHTML = '';
-        
-        this.gameState.players.forEach(player => {
-            const answerSet = document.createElement('div');
-            answerSet.className = 'answer-set';
-            
-            const playerName = document.createElement('h4');
-            playerName.textContent = `${player.name}'s Answers:`;
-            answerSet.appendChild(playerName);
-            
-            this.questions.forEach((question, index) => {
-                const answerP = document.createElement('p');
-                answerP.innerHTML = `<strong>${index + 1}.</strong> ${this.gameState.playerAnswers[player.name][question.id]}`;
-                answerSet.appendChild(answerP);
-            });
-            
-            answersContainer.appendChild(answerSet);
         });
     }
-
-    async playAgain() {
-        if (this.gameState.isHost) {
-            this.stopFireworks();
-            this.gameState.phase = 'waiting-room';
-            this.gameState.currentAnswerer = 0;
-            this.gameState.currentGuesser = 0;
-            this.gameState.currentTarget = 0;
-            this.gameState.playerAnswers = {};
-        }
-        
-        if (this.gameState.roomCode) {
-            localStorage.removeItem(`game_${this.gameState.roomCode}`);
-        }
-        
-        this.gameState = {
-            phase: 'initial-setup',
-            roomCode: null,
-            isHost: false,
-            playerName: '',
-            maxPlayers: 2,
-            players: [],
-            currentAnswerer: 0,
-            currentGuesser: 0,
-            currentTarget: 0,
-            playerAnswers: {},
-            scores: {},
-            guesses: {},
-            reveal: null,
-            gameStarted: false
-        };
-        
-        this.showInitialSetup();
-    }
-
-    showPhase(phaseId) {
-        document.querySelectorAll('.game-phase').forEach(phase => {
-            phase.classList.remove('active');
-        });
-        document.getElementById(phaseId).classList.add('active');
-    }
-
-    showError(message) {
-        document.getElementById('error-message').textContent = message;
-        document.getElementById('error-overlay').style.display = 'flex';
-    }
-
-    closeError() {
-        document.getElementById('error-overlay').style.display = 'none';
-    }
-
-    // Firebase-based game state persistence
-    async saveGameState() {
-        if (!this.firebaseReady || !this.gameState.roomCode) {
-            console.log('⚠️ Firebase not ready or no room code, using localStorage fallback');
-            localStorage.setItem(`game_${this.gameState.roomCode}`, JSON.stringify(this.gameState));
-            return;
-        }
-
-        try {
-            // Only save necessary data to Firebase
-            const gameData = {
-                players: this.gameState.players,
-                playerAnswers: this.gameState.playerAnswers,
-                phase: this.gameState.phase,
-                maxPlayers: this.gameState.maxPlayers,
-                reveal: this.gameState.reveal,
-                currentTarget: this.gameState.currentTarget,
-                scores: this.gameState.scores,
-                guesses: this.gameState.guesses || {},
-                gameStarted: this.gameState.gameStarted || false
-            };
-
-            const gameRef = this.firebaseRef(this.database, `games/${this.gameState.roomCode}`);
-            await this.firebaseSet(gameRef, gameData);
-            console.log('✅ Game state saved to Firebase');
-        } catch (error) {
-            console.error('Error saving to Firebase:', error);
-            // Fallback to localStorage
-            localStorage.setItem(`game_${this.gameState.roomCode}`, JSON.stringify(this.gameState));
-        }
     }
 
     async loadGameState(roomCode) {
